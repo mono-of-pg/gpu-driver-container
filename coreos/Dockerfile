@@ -5,6 +5,7 @@ FROM golang:1.24.0 as build-runtime
 
 WORKDIR /go/src/nvidia-container-runtime
 COPY nvidia-container-runtime .
+RUN go mod init nvidia-container-runtime
 RUN go install -v nvidia-container-runtime
 
 # Build driver image
