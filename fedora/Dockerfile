@@ -103,7 +103,7 @@ COPY nvidia-driver /usr/local/bin
 
 WORKDIR /usr/src/nvidia-$DRIVER_VERSION
 
-# COPY ocp_dtk_entrypoint /usr/local/bin
+COPY ocp_dtk_entrypoint /usr/local/bin
 COPY common.sh /usr/local/bin
 
 COPY --from=build /work/vgpu-util /usr/local/bin
