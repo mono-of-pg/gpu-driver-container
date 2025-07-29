@@ -19,7 +19,7 @@ default:
       command: ["--experimental"]
 
 variables:
-  DRIVER_VERSIONS: 535.230.02 550.144.03 570.124.06
+  DRIVER_VERSIONS: 535.261.03 570.172.08
   BUILD_MULTI_ARCH_IMAGES: "true"
 
 stages:
@@ -55,6 +55,14 @@ workflow:
     - if: $CI_PIPELINE_SOURCE != "schedule"
       when: manual
 
+.precompiled-rules:
+  # only execute precompiled jobs on scheduled pipelines
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: always
+      variables:
+        VERSION: ""
+
 trigger-pipeline:
   stage: trigger
   script:
@@ -73,27 +81,29 @@ trigger-pipeline:
 .driver-versions:
   parallel:
     matrix:
-      - DRIVER_VERSION: [535.230.02, 550.144.03, 570.86.15]
+      - DRIVER_VERSION: [535.261.03, 570.172.08]
 
 # Define the driver versions for jobs that can be run in parallel
 .driver-versions-ubuntu24.04:
   parallel:
     matrix:
-      - DRIVER_VERSION: [550.144.03, 570.86.15]
+      - DRIVER_VERSION: [570.172.08]
 
 # Define the matrix of precompiled jobs that can be run in parallel for ubuntu22.04
 .driver-versions-precompiled-ubuntu22.04:
   parallel:
     matrix:
-      - DRIVER_BRANCH: [535, 550]
+      - DRIVER_BRANCH: [535, 570]
         KERNEL_FLAVOR: [aws, azure, generic, nvidia, oracle]
+        LTS_KERNEL: ["5.15"]
 
 # Define the matrix of precompiled jobs that can be run in parallel for ubuntu24.04
 .driver-versions-precompiled-ubuntu24.04:
   parallel:
     matrix:
-      - DRIVER_BRANCH: [550]
+      - DRIVER_BRANCH: [570]
         KERNEL_FLAVOR: [aws, azure, generic, nvidia, oracle]
+        LTS_KERNEL: ["6.8"]
 
 # Define the distribution targets
 .dist-ubuntu20.04:
@@ -256,6 +266,19 @@ trigger-pipeline:
         VERSION: "${RELEASE_DEVEL_TAG}"
         OUT_VERSION: "${DEVEL_RELEASE_IMAGE_VERSION}"
 
+.release:external-ubuntu24.04:
+  extends:
+    - .release-ubuntu24.04
+  rules:
+    - if: $CI_COMMIT_TAG
+      variables:
+        #VERSION: "${CI_COMMIT_TAG}"
+        OUT_VERSION: ""
+    - if: $CI_COMMIT_BRANCH == $RELEASE_DEVEL_BRANCH
+      variables:
+        VERSION: "${RELEASE_DEVEL_TAG}"
+        OUT_VERSION: "${DEVEL_RELEASE_IMAGE_VERSION}"
+
 .release:external-ubuntu22.04:
   extends:
     - .release-ubuntu22.04
@@ -297,21 +320,30 @@ release:staging-rhel8:
   needs:
     - image-rhel8
 
+release:staging-rhel9:
+  extends:
+    - .release:staging
+    - .dist-rhel9
+  needs:
+    - image-rhel9
+
 .release:staging-precompiled:
   stage: release
   variables:
     IN_REGISTRY: "${STAGING_REGISTRY}"
     IN_IMAGE_NAME: driver
-    OUT_REGISTRY_USER: "${CI_REGISTRY_USER}"
-    OUT_REGISTRY_TOKEN: "${CI_REGISTRY_PASSWORD}"
-    OUT_REGISTRY: "${CI_REGISTRY}"
-    OUT_IMAGE_NAME: "${CI_REGISTRY_IMAGE}/staging/driver"
+    OUT_REGISTRY_USER: "${NGC_REGISTRY_USER}"
+    OUT_REGISTRY_TOKEN: "${NGC_REGISTRY_TOKEN}"
+    OUT_REGISTRY: "${NGC_REGISTRY}"
+    OUT_IMAGE_NAME: "${NGC_STAGING_REGISTRY}/driver"
     # Define the source image for the release
     IMAGE_NAME: "${CI_REGISTRY_IMAGE}"
     VERSION: "${CI_COMMIT_SHORT_SHA}"
     # OUT_VERSION is overridden for external releases
     OUT_VERSION: "${CI_COMMIT_SHORT_SHA}"
     PRECOMPILED: "true"
+  rules:
+    - !reference [.precompiled-rules, rules]
   extends:
     - .release-generic
 

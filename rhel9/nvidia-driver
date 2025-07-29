@@ -17,9 +17,8 @@ USE_HOST_MOFED="${USE_HOST_MOFED:-false}"
 DNF_RELEASEVER=${DNF_RELEASEVER:-""}
 RHEL_VERSION=${RHEL_VERSION:-""}
 RHEL_MAJOR_VERSION=9
-
-OPEN_KERNEL_MODULES_ENABLED=${OPEN_KERNEL_MODULES_ENABLED:-}
-KERNEL_MODULE_TYPE=${KERNEL_MODULE_TYPE:-}
+RHEL_MINOR_VERSION=${RHEL_MINOR_VERSION:-""}
+KERNEL_MODULE_TYPE=${KERNEL_MODULE_TYPE:-auto}
 
 DRIVER_ARCH=${TARGETARCH/amd64/x86_64} && DRIVER_ARCH=${DRIVER_ARCH/arm64/aarch64}
 echo "DRIVER_ARCH is $DRIVER_ARCH"
@@ -59,6 +58,7 @@ _get_rhel_version_from_kernel() {
         return 1
     fi
     RHEL_VERSION="${rhel_version_arr[0]}.${rhel_version_arr[1]}"
+    RHEL_MINOR_VERSION=${rhel_version_arr[1]}
     echo "RHEL VERSION successfully resolved from kernel: ${RHEL_VERSION}"
     return 0
 }
@@ -94,12 +94,6 @@ _install_prerequisites() (
     trap "rm -rf ${tmp_dir}" EXIT
     cd ${tmp_dir}
 
-    echo "Installing elfutils..."
-    if ! dnf install -q -y elfutils-libelf.$DRIVER_ARCH elfutils-libelf-devel.$DRIVER_ARCH; then
-        echo "FATAL: failed to install elfutils packages. RHEL entitlement may be improperly deployed."
-        exit 1
-    fi
-
     rm -rf /lib/modules/${KERNEL_VERSION}
     mkdir -p /lib/modules/${KERNEL_VERSION}/proc
 
@@ -127,12 +121,19 @@ _install_prerequisites() (
       fi
     fi
 
+    echo "Installing elfutils..."
+    dnf install -q -y --releasever=${DNF_RELEASEVER} elfutils-libelf.$DRIVER_ARCH
+    if ! dnf install -y --releasever=${DNF_RELEASEVER} elfutils-libelf-devel.$DRIVER_ARCH; then
+        echo "FATAL: failed to install elfutils-libel-devel. RHEL entitlement may be improperly deployed."
+        exit 1
+    fi
+
     echo "Installing Linux kernel headers..."
     dnf -q -y --releasever=${DNF_RELEASEVER} install kernel-headers-${KERNEL_VERSION} kernel-devel-${KERNEL_VERSION} > /dev/null
     ln -s /usr/src/kernels/${KERNEL_VERSION} /lib/modules/${KERNEL_VERSION}/build
 
     echo "Installing Linux kernel module files..."
-    dnf -q -y --releasever=${DNF_RELEASEVER} install kernel-core-${KERNEL_VERSION} > /dev/null
+    dnf -q -y --releasever=${DNF_RELEASEVER} install kernel-${KERNEL_VERSION} > /dev/null
 
     # Prevent depmod from giving a WARNING about missing files
     touch /lib/modules/${KERNEL_VERSION}/modules.order
@@ -142,7 +143,19 @@ _install_prerequisites() (
 
     echo "Generating Linux kernel version string..."
     if [ "$TARGETARCH" = "arm64" ]; then
-        gunzip -c /lib/modules/${KERNEL_VERSION}/vmlinuz | strings | grep -E '^Linux version' | sed 's/^\(.*\)\s\+(.*)$/\1/' > version
+        # Download unzboot as kernel images are compressed in the zboot format on RHEL 9 arm64
+        # unzboot is only available on the EPEL RPM repo
+        dnf -q -y --releasever=${DNF_RELEASEVER} install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+        dnf config-manager --enable epel
+        dnf -q -y --releasever=${DNF_RELEASEVER} install unzboot
+
+        if ! unzboot /lib/modules/${KERNEL_VERSION}/vmlinuz vmlinuz.out; then
+          echo "Could not extract /lib/modules/${KERNEL_VERSION}/vmlinuz" >&2
+          return 1
+        fi
+
+        < vmlinuz.out strings | grep -E '^Linux version' | sed 's/^\(.*\)\s\+(.*)$/\1/' > version
+        rm vmlinuz.out
     else
         extract-vmlinux /lib/modules/${KERNEL_VERSION}/vmlinuz | strings | grep -E '^Linux version' | sed 's/^\(.*\)\s\+(.*)$/\1/' > version
     fi
@@ -268,6 +281,31 @@ _assert_nvswitch_system() {
     return 0
 }
 
+_assert_nvlink5_system() (
+    for dir in /sys/class/infiniband/*/device; do
+        # Define the path to the VPD file
+        vpd_file="$dir/vpd"
+
+        # Check if the VPD file exists
+        if [ -f "$vpd_file" ]; then
+            # Search for 'SW_MNG' in the VPD file
+            if grep -q "SW_MNG" "$vpd_file"; then
+                echo "Detected NVLink5+ system"
+                return 0
+            fi
+        fi
+    done
+    return 1
+)
+
+_ensure_nvlink5_prerequisites() (
+    until  lsmod | grep mlx5_core > /dev/null 2>&1 && lsmod | grep ib_umad > /dev/null 2>&1;
+    do
+        echo "waiting for the mlx5_core and ib_umad kernel modules to be loaded"
+        sleep 10
+    done
+)
+
 # For each kernel module configuration file mounted into the container,
 # parse the file contents and extract the custom module parameters that
 # are to be passed as input to 'modprobe'.
@@ -337,6 +375,11 @@ _load_driver() {
     echo "Loading ipmi and i2c_core kernel modules..."
     modprobe -a i2c_core ipmi_msghandler ipmi_devintf
 
+    if [[ "$RHEL_MINOR_VERSION" -ge "3" ]]; then
+        echo "Loading the video kernel module..."
+        modprobe video
+    fi
+
     echo "Loading NVIDIA driver kernel modules..."
     set -o xtrace +o nounset
     modprobe nvidia "${NVIDIA_MODULE_PARAMS[@]}"
@@ -370,7 +413,22 @@ _load_driver() {
         _start_vgpu_topology_daemon
     fi
 
-    if _assert_nvswitch_system; then
+    if _assert_nvlink5_system; then
+        _ensure_nvlink5_prerequisites || return 1
+        echo "Starting NVIDIA fabric manager daemon for NVLink5+..."
+
+        fm_config_file=/usr/share/nvidia/nvswitch/fabricmanager.cfg
+        fm_pid_file=/var/run/nvidia-fabricmanager/nv-fabricmanager.pid
+        nvlsm_config_file=/usr/share/nvidia/nvlsm/nvlsm.conf
+        nvlsm_pid_file=/var/run/nvidia-fabricmanager/nvlsm.pid
+        /usr/bin/nvidia-fabricmanager-start.sh --mode start \
+                                               --fm-config-file $fm_config_file \
+                                               --fm-pid-file $fm_pid_file \
+                                               --nvlsm-config-file $nvlsm_config_file \
+                                               --nvlsm-pid-file $nvlsm_pid_file
+
+    # If not a NVLink5+ switch, check for the presence of NVLink4 (or below) switches
+    elif _assert_nvswitch_system; then
         echo "Starting NVIDIA fabric manager daemon..."
         nv-fabricmanager -c /usr/share/nvidia/nvswitch/fabricmanager.cfg
     fi
@@ -385,8 +443,8 @@ _unload_driver() {
     local nvidia_modeset_refs=0
     local nvidia_peermem_refs=0
 
-    echo "Stopping NVIDIA persistence daemon..."
     if [ -f /var/run/nvidia-persistenced/nvidia-persistenced.pid ]; then
+        echo "Stopping NVIDIA persistence daemon..."
         local pid=$(< /var/run/nvidia-persistenced/nvidia-persistenced.pid)
 
         kill -SIGTERM "${pid}"
@@ -405,11 +463,11 @@ _unload_driver() {
         local pid=$(< /var/run/nvidia-gridd/nvidia-gridd.pid)
 
         kill -SIGTERM "${pid}"
-        for i in $(seq 1 10); do
+        for i in $(seq 1 50); do
             kill -0 "${pid}" 2> /dev/null || break
             sleep 0.1
         done
-        if [ $i -eq 10 ]; then
+        if [ $i -eq 50 ]; then
             echo "Could not stop NVIDIA Grid daemon" >&2
             return 1
         fi
@@ -426,6 +484,21 @@ _unload_driver() {
         done
         if [ $i -eq 50 ]; then
             echo "Could not stop NVIDIA fabric manager daemon" >&2
+            return 1
+        fi
+    fi
+
+    if [ -f /var/run/nvidia-fabricmanager/nvlsm.pid ]; then
+        echo "Stopping NVLink Subnet Manager daemon..."
+        local pid=$(< /var/run/nvidia-fabricmanager/nvlsm.pid)
+
+        kill -SIGTERM "${pid}"
+        for i in $(seq 1 50); do
+            kill -0 "${pid}" 2> /dev/null || break
+            sleep 0.1
+        done
+        if [ $i -eq 50 ]; then
+            echo "Could not stop NVLink Subnet Manager daemon" >&2
             return 1
         fi
     fi
@@ -543,13 +616,6 @@ _shutdown() {
 # to install. Valid values for KERNEL_MODULE_TYPE are 'auto' (default), 'open', and 'proprietary'.
 # When 'auto' is configured, we use the nvidia-installer to recommend the module type to install.
 _resolve_kernel_type() {
-  # For backwards compatibility with older GPU Operator versions where KERNEL_MODULE_TYPE is not set,
-  # honor the deprecated OPEN_KERNEL_MODULES_ENABLED field
-  if [ -z "${KERNEL_MODULE_TYPE}" ]; then
-    [[ "${OPEN_KERNEL_MODULES_ENABLED}" == "true" ]] && KERNEL_TYPE=kernel-open || KERNEL_TYPE=kernel
-    return 0
-  fi
-
   if [ "${KERNEL_MODULE_TYPE}" == "proprietary" ]; then
     KERNEL_TYPE=kernel
   elif [ "${KERNEL_MODULE_TYPE}" == "open" ]; then

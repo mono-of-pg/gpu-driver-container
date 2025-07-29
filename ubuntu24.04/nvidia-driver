@@ -47,7 +47,8 @@ _update_ca_certificates() {
 _resolve_kernel_version() {
     local version=$(apt-cache show "linux-headers-${KERNEL_VERSION}" 2> /dev/null | \
       sed -nE 's/^Version:\s+(([0-9]+\.){2}[0-9]+)[-.]([0-9]+).*/\1-\3/p' | head -1)
-    local flavor=$(echo ${KERNEL_VERSION} | sed 's/[^a-z]*//' | grep -Ev "^generic|virtual")
+    local kernel_flavor=$(echo ${KERNEL_VERSION} | sed 's/[^a-z]*//')
+    kernel_flavor="${kernel_flavor//virtual/generic}"
 
     echo "Resolving Linux kernel version..."
     if [ -z "${version}" ]; then
@@ -55,7 +56,7 @@ _resolve_kernel_version() {
         return 1
     fi
 
-    KERNEL_VERSION="${version}-${flavor:-generic}"
+    KERNEL_VERSION="${version}-${kernel_flavor}"
     echo "Proceeding with Linux kernel version ${KERNEL_VERSION}"
     return 0
 }
@@ -123,6 +124,31 @@ _assert_nvswitch_system() {
     fi
     return 0
 }
+
+_assert_nvlink5_system() (
+    for dir in /sys/class/infiniband/*/device; do
+        # Define the path to the VPD file
+        vpd_file="$dir/vpd"
+
+        # Check if the VPD file exists
+        if [ -f "$vpd_file" ]; then
+            # Search for 'SW_MNG' in the VPD file
+            if grep -q "SW_MNG" "$vpd_file"; then
+                echo "Detected NVLink5+ system"
+                return 0
+            fi
+        fi
+    done
+    return 1
+)
+
+_ensure_nvlink5_prerequisites() (
+    until  lsmod | grep mlx5_core > /dev/null 2>&1 && lsmod | grep ib_umad > /dev/null 2>&1;
+    do
+        echo "waiting for the mlx5_core and ib_umad kernel modules to be loaded"
+        sleep 10
+    done
+)
 
 # Check if mellanox devices are present
 _mellanox_devices_present() {
@@ -250,7 +276,22 @@ _load_driver() {
         _start_vgpu_topology_daemon
     fi
 
-    if _assert_nvswitch_system; then
+    if _assert_nvlink5_system; then
+        _ensure_nvlink5_prerequisites || return 1
+        echo "Starting NVIDIA fabric manager daemon for NVLink5+..."
+
+        fm_config_file=/usr/share/nvidia/nvswitch/fabricmanager.cfg
+        fm_pid_file=/var/run/nvidia-fabricmanager/nv-fabricmanager.pid
+        nvlsm_config_file=/usr/share/nvidia/nvlsm/nvlsm.conf
+        nvlsm_pid_file=/var/run/nvidia-fabricmanager/nvlsm.pid
+        /usr/bin/nvidia-fabricmanager-start.sh --mode start \
+                                               --fm-config-file $fm_config_file \
+                                               --fm-pid-file $fm_pid_file \
+                                               --nvlsm-config-file $nvlsm_config_file \
+                                               --nvlsm-pid-file $nvlsm_pid_file
+
+    # If not a NVLink5+ switch, check for the presence of NVLink4 (or below) switches
+    elif _assert_nvswitch_system; then
         echo "Starting NVIDIA fabric manager daemon..."
         nv-fabricmanager -c /usr/share/nvidia/nvswitch/fabricmanager.cfg
     fi
@@ -267,8 +308,8 @@ _unload_driver() {
     local nvidia_modeset_refs=0
     local nvidia_peermem_refs=0
 
-    echo "Stopping NVIDIA persistence daemon..."
     if [ -f /var/run/nvidia-persistenced/nvidia-persistenced.pid ]; then
+        echo "Stopping NVIDIA persistence daemon..."
         local pid=$(< /var/run/nvidia-persistenced/nvidia-persistenced.pid)
 
         kill -SIGTERM "${pid}"
@@ -287,11 +328,11 @@ _unload_driver() {
         local pid=$(< /var/run/nvidia-gridd/nvidia-gridd.pid)
 
         kill -SIGTERM "${pid}"
-        for i in $(seq 1 10); do
+        for i in $(seq 1 50); do
             kill -0 "${pid}" 2> /dev/null || break
             sleep 0.1
         done
-        if [ $i -eq 10 ]; then
+        if [ $i -eq 50 ]; then
             echo "Could not stop NVIDIA Grid daemon" >&2
             return 1
         fi
@@ -308,6 +349,21 @@ _unload_driver() {
         done
         if [ $i -eq 50 ]; then
             echo "Could not stop NVIDIA fabric manager daemon" >&2
+            return 1
+        fi
+    fi
+
+    if [ -f /var/run/nvidia-fabricmanager/nvlsm.pid ]; then
+        echo "Stopping NVLink Subnet Manager daemon..."
+        local pid=$(< /var/run/nvidia-fabricmanager/nvlsm.pid)
+
+        kill -SIGTERM "${pid}"
+        for i in $(seq 1 50); do
+            kill -0 "${pid}" 2> /dev/null || break
+            sleep 0.1
+        done
+        if [ $i -eq 50 ]; then
+            echo "Could not stop NVLink Subnet Manager daemon" >&2
             return 1
         fi
     fi

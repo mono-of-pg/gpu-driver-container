@@ -36,7 +36,21 @@ The procedure is based on [building custom kmod packages](https://github.com/NVI
     ...
     ```
 
-5. Set environment variables, build and push the image:
+5. [Optional] Use custom signing keys
+
+   By default, the build process generates self-signed key and certificate,
+   because the spec file expects them during the build. It uses the
+   `x509-configuration.ini` file to set the OpenSSL configuration. However,
+   for Secure Boot, it is recommended to use signing keys that are trusted by
+   the machines, i.e. that are part of the authorized keys database.
+
+   To pass custom signing key and certificate during the build, you can put
+   them in the current folder as `private_key.priv` for the private key and
+   `public_key.der` for the public certificate in DER format. The build process
+   will use them if they are present, and fallback to self-signed certificate
+   otherwise.
+
+6. Set environment variables, build and push the image:
 
     ```
     export RHSM_ORG_FILE=$HOME/rhsm_org
@@ -50,7 +64,7 @@ The procedure is based on [building custom kmod packages](https://github.com/NVI
     export CUDA_VERSION=12.1.0
     export CUDA_DIST=ubi8
     export DRIVER_EPOCH=1
-    export DRIVER_VERSION=535.230.02
+    export DRIVER_VERSION=535.247.01
     export OS_TAG=rhcos4.13
 
     make image image-push
@@ -76,7 +90,7 @@ Define the `ClusterPolicy` resource to make use of the pre-compiled driver image
     usePrecompiled: true
     image: driver
     repository: nvcr.io/nvidia
-    version: 535.230.02
+    version: 535.247.01
 ```
 
 Find more information in the [Precompiled Driver Containers](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/precompiled-drivers.html) documentation.

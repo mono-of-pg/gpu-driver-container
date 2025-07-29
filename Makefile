@@ -58,9 +58,11 @@ DISTRIBUTIONS := ubuntu18.04 ubuntu20.04 ubuntu22.04 ubuntu24.04 signed_ubuntu20
 PUSH_TARGETS := $(patsubst %, push-%, $(DISTRIBUTIONS))
 BASE_FROM := noble jammy focal
 PUSH_TARGETS := $(patsubst %, push-%, $(DISTRIBUTIONS))
+VGPU_GUEST_DRIVER_PUSH_TARGETS := $(patsubst %, push-vgpuguest-%, $(DISTRIBUTIONS))
 DRIVER_PUSH_TARGETS := $(foreach push_target, $(PUSH_TARGETS), $(addprefix $(push_target)-, $(DRIVER_VERSIONS)))
 BUILD_TARGETS := $(patsubst %, build-%, $(DISTRIBUTIONS))
 DRIVER_BUILD_TARGETS := $(foreach build_target, $(BUILD_TARGETS), $(addprefix $(build_target)-, $(DRIVER_VERSIONS)))
+VGPU_GUEST_DRIVER_BUILD_TARGETS := $(patsubst %, build-vgpuguest-%, $(DISTRIBUTIONS))
 TEST_TARGETS := $(patsubst %, test-%, $(DISTRIBUTIONS))
 PULL_TARGETS := $(patsubst %, pull-%, $(DISTRIBUTIONS))
 DRIVER_PULL_TARGETS := $(foreach pull_target, $(PULL_TARGETS), $(addprefix $(pull_target)-, $(DRIVER_VERSIONS)))
@@ -71,7 +73,7 @@ BASE_PUSH := $(patsubst %, push-base-%, $(BASE_FROM))
 BASE_BUILD_TARGETS := $(foreach target,$(BASE_BUILD),$(target))
 BASE_PUSH_TARGETS := $(foreach target,$(BASE_PUSH),$(target))
 
-PHONY: $(BASE_BUILD_TARGETS) $(BASE_PUSH_TARGETS) $(DISTRIBUTIONS) $(PUSH_TARGETS) $(BUILD_TARGETS) $(TEST_TARGETS) $(PULL_TARGETS) $(ARCHIVE_TARGETS) $(DRIVER_PUSH_TARGETS) $(DRIVER_BUILD_TARGETS) $(DRIVER_PULL_TARGETS) $(DRIVER_ARCHIVE_TARGETS)
+PHONY: $(BASE_BUILD_TARGETS) $(BASE_PUSH_TARGETS) $(DISTRIBUTIONS) $(PUSH_TARGETS) $(BUILD_TARGETS) $(TEST_TARGETS) $(PULL_TARGETS) $(ARCHIVE_TARGETS) $(DRIVER_PUSH_TARGETS) $(DRIVER_BUILD_TARGETS) $(DRIVER_PULL_TARGETS) $(DRIVER_ARCHIVE_TARGETS) $(VGPU_GUEST_DRIVER_BUILD_TARGETS) $(VGPU_GUEST_DRIVER_PUSH_TARGETS)
 
 ifeq ($(BUILD_MULTI_ARCH_IMAGES),true)
 include $(CURDIR)/multi-arch.mk
@@ -90,11 +92,11 @@ pull-signed_ubuntu20.04%: DRIVER_TAG = $(DRIVER_BRANCH)
 
 pull-signed_ubuntu22.04%: DIST = ubuntu22.04
 pull-signed_ubuntu22.04%: DRIVER_TAG = $(DRIVER_BRANCH)
-pull-signed_ubuntu22.04%: IMAGE_TAG = $(if $(VERSION),$(VERSION)-)$(DRIVER_BRANCH)-$(KERNEL_VERSION)-$(DIST)
+pull-signed_ubuntu22.04%: IMAGE_TAG = $(DRIVER_BRANCH)-$(KERNEL_VERSION)-$(DIST)
 
 pull-signed_ubuntu24.04%: DIST = ubuntu24.04
 pull-signed_ubuntu24.04%: DRIVER_TAG = $(DRIVER_BRANCH)
-pull-signed_ubuntu24.04%: IMAGE_TAG = $(if $(VERSION),$(VERSION)-)$(DRIVER_BRANCH)-$(KERNEL_VERSION)-$(DIST)
+pull-signed_ubuntu24.04%: IMAGE_TAG = $(DRIVER_BRANCH)-$(KERNEL_VERSION)-$(DIST)
 
 PLATFORM ?= linux/amd64
 $(DRIVER_PULL_TARGETS): pull-%:
@@ -197,9 +199,12 @@ build-signed_ubuntu24.04%: IMAGE_TAG = $(if $(VERSION),$(VERSION)-)$(DRIVER_BRAN
 build-signed_ubuntu24.04%: DOCKER_BUILD_ARGS =  --build-arg KERNEL_VERSION="$(KERNEL_VERSION)"
 
 # base is an image used to poll Canonical for the latest kernel version
+# LTS_KERNEL must be defined in the environment when invoking this target.
+LTS_KERNEL ?= ""
+build-base-%: $(if $(LTS_KERNEL),,$(error "LTS_KERNEL is not set"))
 build-base-%: DOCKERFILE = $(CURDIR)/base/Dockerfile
 build-base-%: TARGET = $(word 3,$(subst -, ,$@))
-build-base-%: IMAGE_TAG = base-$(word 3,$(subst -, ,$@))-$(KERNEL_FLAVOR)-$(DRIVER_BRANCH)
+build-base-%: IMAGE_TAG = base-$(word 3,$(subst -, ,$@))-$(LTS_KERNEL)-$(KERNEL_FLAVOR)-$(DRIVER_BRANCH)
 $(BASE_BUILD_TARGETS):
 	DOCKER_BUILDKIT=1 \
 		$(DOCKER) $(BUILDX) build --pull --no-cache \
@@ -215,9 +220,50 @@ $(BASE_BUILD_TARGETS):
 				$(CURDIR)/base
 
 push-base-%: TARGET = $(word 3,$(subst -, ,$@))
-push-base-%: IMAGE_TAG = base-$(word 3,$(subst -, ,$@))-$(KERNEL_FLAVOR)-$(DRIVER_BRANCH)
+push-base-%: IMAGE_TAG = base-$(word 3,$(subst -, ,$@))-$(LTS_KERNEL)-$(KERNEL_FLAVOR)-$(DRIVER_BRANCH)
 push-base-%: OUT_IMAGE_TAG = ${IMAGE_TAG}
 $(BASE_PUSH_TARGETS):
 	regctl \
 		image copy \
 		$(IMAGE) $(OUT_IMAGE)
+
+# $(VGPU_GUEST_DRIVER_BUILD_TARGETS) is in the form of build-vgpuguest-$(DIST)
+# The vGPU guest driver .run file is assumed to be present in the $SUBDIR/drivers/ directory.
+# VGPU_GUEST_DRIVER_VERSION must be defined in the environment when invoking this target.
+VGPU_GUEST_DRIVER_VERSION ?= ""
+build-vgpuguest-%: $(if $(VGPU_GUEST_DRIVER_VERSION),,$(error "VGPU_GUEST_DRIVER_VERSION is not set"))
+# Ensure DRIVER_VERSION has the -grid suffix
+build-vgpuguest-%: DRIVER_VERSION := $(addsuffix -grid,$(VGPU_GUEST_DRIVER_VERSION:-grid=))
+build-vgpuguest-%: DRIVER_BRANCH = $(word 1,$(subst ., ,${DRIVER_VERSION}))
+build-vgpuguest-%: DIST = $(word 3,$(subst -, ,$@))
+build-vgpuguest-%: SUBDIR = $(word 3,$(subst -, ,$@))
+build-vgpuguest-%: DOCKERFILE = $(CURDIR)/$(SUBDIR)/Dockerfile
+# Remove '-grid' substring in the image tag
+build-vgpuguest-%: DRIVER_TAG = $(DRIVER_VERSION:-grid=)
+
+build-vgpuguest-rhcos%: SUBDIR = rhel8
+
+$(VGPU_GUEST_DRIVER_BUILD_TARGETS):
+	DOCKER_BUILDKIT=1 \
+		$(DOCKER) $(BUILDX) build --pull \
+				$(DOCKER_BUILD_OPTIONS) \
+				$(DOCKER_BUILD_PLATFORM_OPTIONS) \
+				--tag $(IMAGE) \
+				--build-arg DRIVER_TYPE=vgpu \
+				--build-arg VGPU_LICENSE_SERVER_TYPE=NLS \
+				--build-arg DRIVER_VERSION="$(DRIVER_VERSION)" \
+				--build-arg DRIVER_BRANCH="$(DRIVER_BRANCH)" \
+				--build-arg GOLANG_VERSION="$(GOLANG_VERSION)" \
+				--build-arg CVE_UPDATES="$(CVE_UPDATES)" \
+				$(DOCKER_BUILD_ARGS) \
+				--file $(DOCKERFILE) \
+				$(CURDIR)/$(SUBDIR)
+
+
+# $(VGPU_GUEST_DRIVER_PUSH_TARGETS) is in the form of push-vgpuguest-$(DIST)
+# VGPU_GUEST_DRIVER_VERSION must be defined in the environment when invoking this target.
+push-vgpuguest-%: $(if $(VGPU_GUEST_DRIVER_VERSION),,$(error "VGPU_GUEST_DRIVER_VERSION is not set"))
+# Remove '-grid' substring in the image tag
+push-vgpuguest-%: DRIVER_TAG = $(VGPU_GUEST_DRIVER_VERSION:-grid=)
+push-vgpuguest-%: DIST = $(word 3,$(subst -, ,$@))
+

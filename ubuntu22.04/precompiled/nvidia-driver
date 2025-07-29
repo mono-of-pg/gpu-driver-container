@@ -4,7 +4,6 @@
 set -eu
 
 KERNEL_VERSION=$(uname -r)
-OPEN_KERNEL_MODULES_ENABLED="${OPEN_KERNEL_MODULES_ENABLED:-false}"
 RUN_DIR=/run/nvidia
 PID_FILE=${RUN_DIR}/${0##*/}.pid
 DRIVER_BRANCH=${DRIVER_BRANCH:?"Missing driver version"}
@@ -14,6 +13,8 @@ NVIDIA_MODULE_PARAMS=()
 NVIDIA_UVM_MODULE_PARAMS=()
 NVIDIA_MODESET_MODULE_PARAMS=()
 NVIDIA_PEERMEM_MODULE_PARAMS=()
+TARGETARCH=${TARGETARCH:?"Missing TARGETARCH env"}
+KERNEL_MODULE_TYPE=${KERNEL_MODULE_TYPE:-auto}
 
 _update_package_cache() {
     if [ "${PACKAGE_TAG:-}" != "builtin" ]; then
@@ -29,6 +30,31 @@ _assert_nvswitch_system() {
     fi
     return 0
 }
+
+_assert_nvlink5_system() (
+    for dir in /sys/class/infiniband/*/device; do
+        # Define the path to the VPD file
+        vpd_file="$dir/vpd"
+
+        # Check if the VPD file exists
+        if [ -f "$vpd_file" ]; then
+            # Search for 'SW_MNG' in the VPD file
+            if grep -q "SW_MNG" "$vpd_file"; then
+                echo "Detected NVLink5+ system"
+                return 0
+            fi
+        fi
+    done
+    return 1
+)
+
+_ensure_nvlink5_prerequisites() (
+    until  lsmod | grep mlx5_core > /dev/null 2>&1 && lsmod | grep ib_umad > /dev/null 2>&1;
+    do
+        echo "waiting for the mlx5_core and ib_umad kernel modules to be loaded"
+        sleep 10
+    done
+)
 
 # Check if mellanox devices are present
 _mellanox_devices_present() {
@@ -142,12 +168,31 @@ _load_driver() {
     nvidia-persistenced --persistence-mode
 
     DRIVER_VERSION=$(nvidia-smi -q | grep "Driver Version" | awk -F: '{print $2}' | xargs)
-    if _assert_nvswitch_system; then
+    if _assert_nvlink5_system; then
+        _ensure_nvlink5_prerequisites || return 1
+
+        echo "Installing NVIDIA fabric manager, libnvsdm and nvlsm packages..."
+        apt-get install -y --no-install-recommends \
+            infiniband-diags \
+            nvidia-fabricmanager-${DRIVER_BRANCH}=${DRIVER_VERSION}-1 \
+            libnvsdm-${DRIVER_BRANCH}=${DRIVER_VERSION}-1 \
+            nvlsm
+
+        echo "Starting NVIDIA fabric manager daemon for NVLink5+..."
+
+        fm_config_file=/usr/share/nvidia/nvswitch/fabricmanager.cfg
+        fm_pid_file=/var/run/nvidia-fabricmanager/nv-fabricmanager.pid
+        nvlsm_config_file=/usr/share/nvidia/nvlsm/nvlsm.conf
+        nvlsm_pid_file=/var/run/nvidia-fabricmanager/nvlsm.pid
+        /usr/bin/nvidia-fabricmanager-start.sh $fm_config_file $fm_pid_file $nvlsm_config_file $nvlsm_pid_file
+
+    # If not a NVLink5+ switch, check for the presence of NVLink4 (or below) switches
+    elif _assert_nvswitch_system; then
         echo "Installing NVIDIA fabric manager and libnvidia NSCQ packages..."
         apt-get install -y --no-install-recommends \
             nvidia-fabricmanager-${DRIVER_BRANCH}=${DRIVER_VERSION}-1 \
             libnvidia-nscq-${DRIVER_BRANCH}=${DRIVER_VERSION}-1
- 
+
         echo "Starting NVIDIA fabric manager daemon..."
         nv-fabricmanager -c /usr/share/nvidia/nvswitch/fabricmanager.cfg
     fi
@@ -164,8 +209,8 @@ _unload_driver() {
     local nvidia_modeset_refs=0
     local nvidia_peermem_refs=0
 
-    echo "Stopping NVIDIA persistence daemon..."
     if [ -f /var/run/nvidia-persistenced/nvidia-persistenced.pid ]; then
+        echo "Stopping NVIDIA persistence daemon..."
         local pid=$(< /var/run/nvidia-persistenced/nvidia-persistenced.pid)
 
         kill -SIGTERM "${pid}"
@@ -190,6 +235,21 @@ _unload_driver() {
         done
         if [ $i -eq 50 ]; then
             echo "Could not stop NVIDIA fabric manager daemon" >&2
+            return 1
+        fi
+    fi
+
+    if [ -f /var/run/nvidia-fabricmanager/nvlsm.pid ]; then
+        echo "Stopping NVLink Subnet Manager daemon..."
+        local pid=$(< /var/run/nvidia-fabricmanager/nvlsm.pid)
+
+        kill -SIGTERM "${pid}"
+        for i in $(seq 1 50); do
+            kill -0 "${pid}" 2> /dev/null || break
+            sleep 0.1
+        done
+        if [ $i -eq 50 ]; then
+            echo "Could not stop NVLink Subnet Manager daemon" >&2
             return 1
         fi
     fi
@@ -232,6 +292,36 @@ _unload_driver() {
     return 0
 }
 
+_resolve_kernel_type_from_driver_branch() {
+  [[ "${DRIVER_BRANCH}" -lt 560 ]] && KERNEL_TYPE=kernel || KERNEL_TYPE=kernel-open
+}
+
+# _resolve_kernel_type determines which kernel module type, open or proprietary, to install.
+# This function assumes that the nvidia-installer binary is in the PATH, so this function
+# should only be invoked after the userspace driver components have been installed.
+#
+# KERNEL_MODULE_TYPE is the frontend interface that users can use to configure which module
+# to install. Valid values for KERNEL_MODULE_TYPE are 'auto' (default), 'open', and 'proprietary'.
+# When 'auto' is configured, we use the nvidia-installer to recommend the module type to install.
+_resolve_kernel_type() {
+  if [ "${KERNEL_MODULE_TYPE}" == "proprietary" ]; then
+    KERNEL_TYPE=kernel
+  elif [ "${KERNEL_MODULE_TYPE}" == "open" ]; then
+    KERNEL_TYPE=kernel-open
+  elif [ "${KERNEL_MODULE_TYPE}" == "auto" ]; then
+    kernel_module_type=$(nvidia-installer --print-recommended-kernel-module-type 2> /dev/null)
+    if [ $? -ne 0 ]; then
+      echo "failed to retrieve the recommended kernel module type from nvidia-installer, falling back to using the driver branch"
+      _resolve_kernel_type_from_driver_branch
+      return 0
+    fi
+    [[ "${kernel_module_type}" == "open" ]] && KERNEL_TYPE=kernel-open || KERNEL_TYPE=kernel
+  else
+    echo "invalid value for the KERNEL_MODULE_TYPE variable: ${KERNEL_MODULE_TYPE}"
+    return 1
+  fi
+}
+
 # Link and install the kernel modules from a precompiled packages
 _install_driver() {
     # Install necessary driver userspace packages
@@ -244,7 +334,7 @@ _install_driver() {
         libnvidia-fbc1-${DRIVER_BRANCH}-server
 
     # Now install the precompiled kernel module packages signed by Canonical
-    if [ "$OPEN_KERNEL_MODULES_ENABLED" = true ]; then
+    if [ "$KERNEL_TYPE" = "kernel-open" ]; then
         echo "Installing Open NVIDIA driver kernel modules..."
         apt-get install --no-install-recommends -y \
             linux-signatures-nvidia-${KERNEL_VERSION} \
@@ -276,6 +366,9 @@ _unmount_rootfs() {
 }
 
 init() {
+    # Determine the kernel module type
+    _resolve_kernel_type || exit 1
+
     echo -e "\n========== NVIDIA Software Installer ==========\n"
     echo -e "Starting installation of NVIDIA driver branch ${DRIVER_BRANCH} for Linux kernel version ${KERNEL_VERSION}\n"
 

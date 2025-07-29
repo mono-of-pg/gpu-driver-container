@@ -1,4 +1,4 @@
-FROM nvcr.io/nvidia/cuda:12.8.0-base-ubi8 as build
+FROM nvcr.io/nvidia/cuda:12.9.1-base-ubi8 as build
 
 ARG TARGETARCH
 ARG GOLANG_VERSION
@@ -21,7 +21,7 @@ RUN git clone https://github.com/NVIDIA/gpu-driver-container driver && \
     go build -o vgpu-util && \
     mv vgpu-util /work
 
-FROM nvcr.io/nvidia/cuda:12.8.0-base-ubi8
+FROM nvcr.io/nvidia/cuda:12.9.1-base-ubi8
 
 ARG TARGETARCH
 ENV TARGETARCH=$TARGETARCH
@@ -62,15 +62,12 @@ RUN sh /tmp/install.sh depinstall && \
 
 ADD drivers drivers/
 
-# Fetch the installer automatically for passthrough/baremetal types
+# Fetch the installer, fabricmanager and libnvidia-nscq automatically for passthrough/baremetal types
 RUN if [ "$DRIVER_TYPE" != "vgpu" ]; then \
     cd drivers && \
     DRIVER_ARCH=${TARGETARCH/amd64/x86_64} && DRIVER_ARCH=${DRIVER_ARCH/arm64/aarch64} && \
     curl -fSsl -O $BASE_URL/$DRIVER_VERSION/NVIDIA-Linux-$DRIVER_ARCH-$DRIVER_VERSION.run && \
-    chmod +x  NVIDIA-Linux-$DRIVER_ARCH-$DRIVER_VERSION.run; fi
-
-# Install fabric-manager packages
-RUN if [ "$DRIVER_TYPE" != "vgpu" ] && [ "$TARGETARCH" != "arm64" ]; then \
+    chmod +x  NVIDIA-Linux-$DRIVER_ARCH-$DRIVER_VERSION.run && \
     versionArray=(${DRIVER_VERSION//./ }); \
     DRIVER_BRANCH=${versionArray[0]}; \
     if [ ${versionArray[0]} -ge 470 ] || ([ ${versionArray[0]} == 460 ] && [ ${versionArray[1]} -ge 91 ]); then \
@@ -83,6 +80,13 @@ RUN if [ "$DRIVER_TYPE" != "vgpu" ] && [ "$TARGETARCH" != "arm64" ]; then \
 
 RUN if [ "$DRIVER_TYPE" != "vgpu" ] && [ "$DRIVER_BRANCH" -ge "550" ]; then \
     dnf install -y nvidia-imex-${DRIVER_BRANCH}-${DRIVER_VERSION}-1; fi
+
+RUN if [ "$DRIVER_TYPE" != "vgpu" ] && [ "$DRIVER_BRANCH" -ge "570" ]; then \
+    dnf install -y infiniband-diags nvlsm; fi
+
+# libnvsdm packages are not available for arm64
+RUN if [ "$DRIVER_TYPE" != "vgpu" ] && [ "$DRIVER_BRANCH" -ge "570" ] && [ "$TARGETARCH" != "arm64" ]; then \
+    dnf install -y libnvsdm-${DRIVER_BRANCH}-${DRIVER_VERSION}-1; fi
 
 COPY nvidia-driver /usr/local/bin
 COPY ocp_dtk_entrypoint /usr/local/bin

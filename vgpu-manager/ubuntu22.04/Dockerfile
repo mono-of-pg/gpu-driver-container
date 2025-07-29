@@ -1,4 +1,4 @@
-FROM nvcr.io/nvidia/cuda:12.8.0-base-ubuntu22.04
+FROM nvcr.io/nvidia/cuda:12.9.1-base-ubuntu22.04
 
 ARG DRIVER_VERSION
 ENV DRIVER_VERSION=$DRIVER_VERSION
@@ -16,6 +16,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         file \
         kmod \
         pciutils && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install the gcc-12 package in Ubuntu 22.04 as Kernels with versions 5.19.x and 6.5.x need gcc 12.3.0 for compilation
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc-12 g++-12 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 12 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 12 && \
     rm -rf /var/lib/apt/lists/*
 
 RUN echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ jammy main universe" > /etc/apt/sources.list && \

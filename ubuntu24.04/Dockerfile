@@ -1,4 +1,4 @@
-FROM nvcr.io/nvidia/cuda:12.8.0-base-ubuntu24.04 as build
+FROM nvcr.io/nvidia/cuda:12.9.1-base-ubuntu24.04 as build
 
 ARG TARGETARCH
 ARG GOLANG_VERSION
@@ -34,7 +34,7 @@ RUN git clone https://github.com/NVIDIA/gpu-driver-container driver && \
     go build -o vgpu-util && \
     mv vgpu-util /work
 
-FROM nvcr.io/nvidia/cuda:12.8.0-base-ubuntu24.04
+FROM nvcr.io/nvidia/cuda:12.9.1-base-ubuntu24.04
 
 SHELL ["/bin/bash", "-c"]
 
@@ -72,13 +72,10 @@ COPY --from=build /work/vgpu-util /usr/local/bin
 
 ADD drivers drivers/
 
-# Fetch the installer automatically for passthrough/baremetal types
+# Fetch the installer, fabricmanager and libnvidia-nscq automatically for passthrough/baremetal types
 RUN if [ "$DRIVER_TYPE" != "vgpu" ]; then \
     cd drivers && \
-    /tmp/install.sh download_installer; fi
-
-# Fabric manager packages are not available for arm64
-RUN if [ "$DRIVER_TYPE" != "vgpu" ] && [ "$TARGETARCH" != "arm64" ]; then \
+    /tmp/install.sh download_installer && \
     apt-get update && \
     apt-get install -y --no-install-recommends nvidia-fabricmanager-${DRIVER_BRANCH}=${DRIVER_VERSION}-1 \
     libnvidia-nscq-${DRIVER_BRANCH}=${DRIVER_VERSION}-1 && \
@@ -86,7 +83,14 @@ RUN if [ "$DRIVER_TYPE" != "vgpu" ] && [ "$TARGETARCH" != "arm64" ]; then \
 
 RUN if [ "$DRIVER_TYPE" != "vgpu" ] && [ "$DRIVER_BRANCH" -ge "550" ]; then \
     apt-get update && \
-    apt-get install -y --no-install-recommends nvidia-imex-${DRIVER_BRANCH}=${DRIVER_VERSION}-1 && \
+    apt-get install -y --no-install-recommends nvlsm infiniband-diags \
+    nvidia-imex-${DRIVER_BRANCH}=${DRIVER_VERSION}-1 && \
+    rm -rf /var/lib/apt/lists/*; fi
+
+# libnvsdm packages are not available for arm64
+RUN if [ "$DRIVER_TYPE" != "vgpu" ] && [ "$DRIVER_BRANCH" -ge "560" ] && [ "$TARGETARCH" != "arm64" ]; then \
+    apt-get update && \
+    apt-get install -y --no-install-recommends libnvsdm-${DRIVER_BRANCH}=${DRIVER_VERSION}-1 && \
     rm -rf /var/lib/apt/lists/*; fi
 
 WORKDIR  /drivers

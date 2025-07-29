@@ -34,25 +34,22 @@ jobs:
     strategy:
       matrix:
         driver:
-          - 535.230.02
-          - 550.144.03
-          - 570.124.06
+          - 535.261.03
+          - 570.172.08
         dist:
           - ubuntu20.04
           - ubuntu22.04
           - ubuntu24.04
           - rhel8
+          - rhel9
         ispr:
           - ${{github.event_name == 'pull_request'}}
         exclude:
           - ispr: true
             dist: ubuntu20.04
-            driver: 535.230.02
-          - ispr: true
-            dist: ubuntu20.04
-            driver: 550.144.03
+            driver: 535.261.03
           - dist: ubuntu24.04
-            driver: 535.230.02
+            driver: 535.261.03
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
@@ -101,7 +98,7 @@ jobs:
       matrix:
         driver: 
           - 535
-          - 550
+          - 570
         flavor:
           - aws
           - azure
@@ -111,6 +108,9 @@ jobs:
         dist:
           - ubuntu22.04
           - ubuntu24.04
+        lts_kernel:
+          - 5.15
+          - 6.8
         ispr:
           - ${{github.event_name == 'pull_request'}}
         exclude:
@@ -123,6 +123,8 @@ jobs:
           - ispr: true
             flavor: oracle
           - driver: 535
+            dist: ubuntu24.04
+          - lts_kernel: 5.15
             dist: ubuntu24.04
     steps:
       - uses: actions/checkout@v4
@@ -163,18 +165,17 @@ jobs:
         env:
           IMAGE_NAME: ghcr.io/${LOWERCASE_REPO_OWNER}/driver
           VERSION: ${COMMIT_SHORT_SHA}
+          LTS_KERNEL: ${{ matrix.lts_kernel }}
         run: |
           if [[ "${{ matrix.dist }}" == "ubuntu22.04" ]]; then
             BASE_TARGET="jammy"
-            LTS_KERNEL="5.15"
           elif [[ "${{ matrix.dist }}" == "ubuntu24.04" ]]; then
             BASE_TARGET="noble"
-            LTS_KERNEL="6.8"
           fi
           make DRIVER_BRANCH=${{ matrix.driver }} KERNEL_FLAVOR=${{ matrix.flavor }} LTS_KERNEL=${LTS_KERNEL} build-base-${BASE_TARGET}
 
           trap "docker rm -f base-${BASE_TARGET}-${{ matrix.flavor }}" EXIT
-          docker run -d --name base-${BASE_TARGET}-${{ matrix.flavor }} ghcr.io/nvidia/driver:base-${BASE_TARGET}-${{ matrix.flavor }}-${{ matrix.driver }} 
+          docker run -d --name base-${BASE_TARGET}-${{ matrix.flavor }} ghcr.io/nvidia/driver:base-${BASE_TARGET}-${LTS_KERNEL}-${{ matrix.flavor }}-${{ matrix.driver }}
           # try 3 times every 10 seconds to get the file, if success exit the loop
           for i in {1..3}; do
               docker cp base-${BASE_TARGET}-${{ matrix.flavor }}:/var/kernel_version.txt kernel_version.txt && break

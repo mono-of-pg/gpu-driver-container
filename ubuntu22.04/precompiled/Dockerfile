@@ -1,10 +1,13 @@
-FROM nvcr.io/nvidia/cuda:12.8.0-base-ubuntu22.04
+FROM nvcr.io/nvidia/cuda:12.9.1-base-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+ARG BASE_URL=https://us.download.nvidia.com/tesla
+ARG TARGETARCH
+ENV TARGETARCH=$TARGETARCH
 ARG DRIVER_BRANCH=535
 ENV DRIVER_BRANCH=$DRIVER_BRANCH
-ARG DRIVER_VERSION=535.230.02
+ARG DRIVER_VERSION=535.247.01
 ENV DRIVER_VERSION=$DRIVER_VERSION
 
 ARG KERNEL_VERSION=5.15.0-116-generic
@@ -60,6 +63,7 @@ ADD local-repo.sh /tmp
 RUN mkdir -p /usr/local/repos && \
     /tmp/local-repo.sh download_driver_package_deps && \
     /tmp/local-repo.sh build_local_apt_repo && \
+    /tmp/local-repo.sh fetch_nvidia_installer && \
     # Remove cuda repository to avoid GPG errors
     rm -f /etc/apt/sources.list.d/cuda*
 
