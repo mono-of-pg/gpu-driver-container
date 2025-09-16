@@ -1,6 +1,6 @@
 ARG FEDORA_VERSION=36
 
-FROM nvcr.io/nvidia/cuda:12.9.1-base-ubi8 as build
+FROM nvcr.io/nvidia/cuda:13.0.1-base-ubi9 as build
 
 ARG TARGETARCH
 
@@ -65,7 +65,7 @@ ADD install.sh /tmp/
 
 RUN NVIDIA_GPGKEY_SUM=d0664fbbdb8c32356d45de36c5984617217b2d0bef41b93ccecd326ba3b80c87 && \
     OS_ARCH=${TARGETARCH/amd64/x86_64} && OS_ARCH=${OS_ARCH/arm64/sbsa} && \
-    curl -fsSL "https://developer.download.nvidia.com/compute/cuda/repos/rhel8/$OS_ARCH/D42D0685.pub" | sed '/^Version/d' > /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA && \
+    curl -fsSL "https://developer.download.nvidia.com/compute/cuda/repos/rhel9/$OS_ARCH/D42D0685.pub" | sed '/^Version/d' > /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA && \
     echo "$NVIDIA_GPGKEY_SUM  /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA" | sha256sum -c --strict -
 
 RUN sh /tmp/install.sh depinstall && \
