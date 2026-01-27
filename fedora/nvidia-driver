@@ -7,7 +7,7 @@ RUN_DIR=/run/nvidia
 PID_FILE=${RUN_DIR}/${0##*/}.pid
 DRIVER_VERSION=${DRIVER_VERSION:?"Missing DRIVER_VERSION env"}
 KERNEL_UPDATE_HOOK=/run/kernel/postinst.d/update-nvidia-driver
-KOJI_BASE_URL=https://kojipkgs.fedoraproject.org
+REPO_BASE_URL=https://mirror.stream.centos.org/10-stream/AppStream
 NUM_VGPU_DEVICES=0
 NVIDIA_MODULE_PARAMS=()
 NVIDIA_UVM_MODULE_PARAMS=()
@@ -84,11 +84,11 @@ _install_prerequisites() (
     echo "Installing Linux kernel headers..."
     if ! dnf -q -y install kernel-headers-${KERNEL_VERSION} > /dev/null; then
         echo "Failed to find kernel-headers-${KERNEL_VERSION} in repositories."
-        echo "Trying to download kernel-headers from koji..."
-        KOJI_KERNEL_HEADERS_RPM=$KOJI_BASE_URL/packages/kernel-headers/$KERNEL_RPM_VERSION/$KERNEL_RPM_RELEASE/$KERNEL_RPM_ARCH/kernel-headers-$KERNEL_VERSION.rpm
-        if ! dnf -q -y install $KOJI_KERNEL_HEADERS_RPM \
+        echo "Trying to download kernel-headers from fallback repo..."
+        REPO_KERNEL_HEADERS_RPM=$REPO_BASE_URL/$KERNEL_RPM_ARCH/os/Packages/kernel-headers-$KERNEL_VERSION.rpm
+        if ! dnf -q -y install $REPO_KERNEL_HEADERS_RPM \
           --setopt=install_weak_deps=False; then
-            echo "Failed to find kernel-headers-${KERNEL_VERSION} in koji."
+            echo "Failed to find kernel-headers-${KERNEL_VERSION} in fallback repo."
             echo "Installing generic version..."
             dnf -q -y install kernel-headers
         fi
@@ -99,9 +99,9 @@ _install_prerequisites() (
     echo "Installing Linux development files..."
     if ! dnf -q -y install kernel-devel-${KERNEL_VERSION} > /dev/null; then
         echo "Failed to find kernel-devel-${KERNEL_VERSION} in repositories."
-        echo "Trying to download kernel-devel from koji..."
-        KOJI_KERNEL_DEVEL_RPM=$KOJI_BASE_URL/packages/kernel/$KERNEL_RPM_VERSION/$KERNEL_RPM_RELEASE/$KERNEL_RPM_ARCH/kernel-devel-$KERNEL_VERSION.rpm
-        if ! dnf -q -y install $KOJI_KERNEL_DEVEL_RPM \
+        echo "Trying to download kernel-devel from fallback repo..."
+        REPO_KERNEL_DEVEL_RPM=$REPO_BASE_URL/$KERNEL_RPM_ARCH/os/Packages/kernel-devel-$KERNEL_VERSION.rpm
+        if ! dnf -q -y install $REPO_KERNEL_DEVEL_RPM \
           --setopt=install_weak_deps=False; then
             echo "Can't find kernel-devel-${KERNEL_VERSION}"
             echo "Please try to update your kernel on the host system."
@@ -115,9 +115,9 @@ _install_prerequisites() (
     echo "Installing Linux kernel-core files..."
     if ! dnf -q -y download kernel-core-${KERNEL_VERSION} > /dev/null; then
         echo "Failed to find kernel-core-${KERNEL_VERSION} in repositories."
-        echo "Trying to download kernel-core from koji..."
-        KOJI_KERNEL_CORE_RPM=$KOJI_BASE_URL/packages/kernel/$KERNEL_RPM_VERSION/$KERNEL_RPM_RELEASE/$KERNEL_RPM_ARCH/kernel-core-$KERNEL_VERSION.rpm
-        if ! dnf -q -y download $KOJI_KERNEL_CORE_RPM; then
+        echo "Trying to download kernel-core from fallback repo..."
+        REPO_KERNEL_CORE_RPM=$REPO_BASE_URL/$KERNEL_RPM_ARCH/os/Packages/kernel-core-$KERNEL_VERSION.rpm
+        if ! dnf -q -y download $REPO_KERNEL_CORE_RPM; then
             echo "Can't find kernel-core-${KERNEL_VERSION}"
             echo "Please try to update your kernel on the host system."
             exit 1
@@ -131,16 +131,15 @@ _install_prerequisites() (
     echo "Installing Linux kernel-modules-core files..."
     if ! dnf -q -y download kernel-modules-core${KERNEL_VERSION} > /dev/null; then
         echo "Failed to find kernel-modules-core-${KERNEL_VERSION} in repositories."
-        echo "Trying to download kernel-modules-core from koji..."
-        #KOJI_KERNEL_CORE_RPM=$KOJI_BASE_URL/packages/kernel/$KERNEL_RPM_VERSION/$KERNEL_RPM_RELEASE/$KERNEL_RPM_ARCH/kernel-modules-core-$KERNEL_VERSION.rpm
-        KOJI_KERNEL_CORE_RPM=https://rpmfind.net/linux/centos-stream/9-stream/BaseOS/$KERNEL_RPM_ARCH/os/Packages/kernel-modules-core-$KERNEL_VERSION.rpm
-        if ! dnf -q -y download $KOJI_KERNEL_CORE_RPM \
+        echo "Trying to download kernel-modules-core from fallback repo..."
+        REPO_KERNEL_CORE_RPM=$REPO_BASE_URL/$KERNEL_RPM_ARCH/os/Packages/kernel-modules-core-$KERNEL_VERSION.rpm
+        if ! dnf -q -y download $REPO_KERNEL_CORE_RPM \
           --setopt=install_weak_deps=False; then
             echo "Can't find kernel-modules-core-${KERNEL_VERSION}"
             echo "Please try to update your kernel on the host system."
             exit 1
         else
-            echo 'Kernel-modules-core installed from koji'
+            echo 'Kernel-modules-core installed from fallback repo'
         fi
     fi
     echo "List kernel-modules rpm version installed:"
@@ -184,7 +183,7 @@ _install_prerequisites() (
         # So we try, but allow failure of installation of precise gcc version.
         dnf install -q -y "gcc-${gcc_version}" | true
         if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
-            # We could try to download gcc rpm from koji, and there exists a python package to
+            # We could try to download gcc rpm from fallback repo, and there exists a python package to
             # help with that, but it would require also finding/downloading other rpms and in-
             # stalling those too.  For now we have opted to allow mismatches.
             export IGNORE_CC_MISMATCH=1
