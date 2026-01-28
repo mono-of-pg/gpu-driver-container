@@ -7,6 +7,7 @@ ARG TARGETARCH
 
 SHELL ["/bin/bash", "-c"]
 
+RUN dnf config-manager --add-repo https://kitten.repo.almalinux.org/10-kitten/
 RUN dnf install -y git wget
 
 ENV GOLANG_VERSION=1.21.5
@@ -28,6 +29,7 @@ RUN git clone https://github.com/NVIDIA/gpu-driver-container driver && \
 #ARG FEDORA_VERSION=36
 
 FROM nvcr.io/nvidia/cuda:13.1.0-base-ubi10
+RUN dnf config-manager --add-repo https://kitten.repo.almalinux.org/10-kitten/
 #FROM almalinux:10-kitten
 #FROM fedora:${FEDORA_VERSION}
 
