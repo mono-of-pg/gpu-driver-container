@@ -1,4 +1,4 @@
-ARG FEDORA_VERSION=36
+#ARG FEDORA_VERSION=36
 
 #FROM nvcr.io/nvidia/cuda:13.0.1-base-ubi9 as build
 FROM almalinux:10-kitten as build
@@ -25,9 +25,9 @@ RUN git clone https://github.com/NVIDIA/gpu-driver-container driver && \
     go build -o vgpu-util && \
     mv vgpu-util /work
 
-ARG FEDORA_VERSION=36
+#ARG FEDORA_VERSION=36
 
-FROM almalinux:10-kitten
+#FROM almalinux:10-kitten
 #FROM fedora:${FEDORA_VERSION}
 
 ARG TARGETARCH
