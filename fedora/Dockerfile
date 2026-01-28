@@ -1,7 +1,7 @@
 #ARG FEDORA_VERSION=36
 
 #FROM nvcr.io/nvidia/cuda:13.0.1-base-ubi9 as build
-FROM almalinux:10-kitten as build
+FROM nvcr.io/nvidia/cuda:13.1.0-base-ubi10 as build
 
 ARG TARGETARCH
 
