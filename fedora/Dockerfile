@@ -27,7 +27,7 @@ RUN git clone https://github.com/NVIDIA/gpu-driver-container driver && \
 
 #ARG FEDORA_VERSION=36
 
-#FROM almalinux:10-kitten
+FROM almalinux:10-kitten
 #FROM fedora:${FEDORA_VERSION}
 
 ARG TARGETARCH
