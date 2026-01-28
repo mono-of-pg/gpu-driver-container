@@ -27,7 +27,8 @@ RUN git clone https://github.com/NVIDIA/gpu-driver-container driver && \
 
 ARG FEDORA_VERSION=36
 
-FROM fedora:${FEDORA_VERSION}
+FROM almalinux:10-kitten
+#FROM fedora:${FEDORA_VERSION}
 
 ARG TARGETARCH
 ENV TARGETARCH=$TARGETARCH
@@ -64,9 +65,9 @@ RUN dnf install -y util-linux 'dnf-command(download)'
 
 ADD install.sh /tmp/
 
-RUN NVIDIA_GPGKEY_SUM=d0664fbbdb8c32356d45de36c5984617217b2d0bef41b93ccecd326ba3b80c87 && \
+RUN NVIDIA_GPGKEY_SUM=afbea87d3b979b3788ef34223aeeb323ade481128e2c133723ae99b8a51368bb && \
     OS_ARCH=${TARGETARCH/amd64/x86_64} && OS_ARCH=${OS_ARCH/arm64/sbsa} && \
-    curl -fsSL "https://developer.download.nvidia.com/compute/cuda/repos/rhel9/$OS_ARCH/D42D0685.pub" | sed '/^Version/d' > /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA && \
+    curl -fsSL "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/$OS_ARCH/CDF6BA43.pub" | sed '/^Version/d' > /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA && \
     echo "$NVIDIA_GPGKEY_SUM  /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA" | sha256sum -c --strict -
 
 RUN sh /tmp/install.sh depinstall && \
