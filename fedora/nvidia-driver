@@ -68,8 +68,7 @@ _install_prerequisites() (
     cd ${tmp_dir}
 
     echo "Installing elfutils..."
-#    if ! dnf install -q -y elfutils-libelf.$DRIVER_ARCH elfutils-libelf-devel.$DRIVER_ARCH; then
-    if ! dnf install -q -y elfutils-libelf; then
+    if ! dnf install -q -y elfutils-libelf.$DRIVER_ARCH elfutils-libelf-devel.$DRIVER_ARCH; then
         echo "FATAL: failed to install elfutils packages."
         exit 1
     fi
