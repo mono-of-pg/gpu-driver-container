@@ -61,7 +61,7 @@ ENV DISABLE_VGPU_VERSION_CHECK=$DISABLE_VGPU_VERSION_CHECK
 ENV NVIDIA_VISIBLE_DEVICES=void
 
 # getopt etc.
-RUN dnf install -y util-linux 'dnf-command(download)'
+RUN dnf install -y util-linux 'dnf-command(download)' module-init-tools
 
 ADD install.sh /tmp/
 
