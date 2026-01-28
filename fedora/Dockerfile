@@ -7,7 +7,7 @@ ARG TARGETARCH
 
 SHELL ["/bin/bash", "-c"]
 
-RUN dnf config-manager --add-repo https://kitten.repo.almalinux.org/10-kitten/BaseOS/$OS_ARCH/os/
+RUN dnf config-manager --add-repo https://kitten.repo.almalinux.org/10-kitten/BaseOS/x86_64/os/
 RUN dnf install -y git wget
 
 ENV GOLANG_VERSION=1.21.5
@@ -63,7 +63,7 @@ ENV DISABLE_VGPU_VERSION_CHECK=$DISABLE_VGPU_VERSION_CHECK
 ENV NVIDIA_VISIBLE_DEVICES=void
 
 # getopt etc.
-RUN dnf config-manager --add-repo https://kitten.repo.almalinux.org/10-kitten/BaseOS/$OS_ARCH/os/
+RUN dnf config-manager --add-repo https://kitten.repo.almalinux.org/10-kitten/BaseOS/x86_64/os/
 RUN dnf install -y util-linux 'dnf-command(download)' module-init-tools cpio
 
 ADD install.sh /tmp/
