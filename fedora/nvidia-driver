@@ -351,6 +351,9 @@ _load_driver() {
     echo "Loading ipmi and i2c_core kernel modules..."
     modprobe -a i2c_core ipmi_msghandler ipmi_devintf
 
+    echo "Loading video (needed for newer kernels)..."
+    modprobe video
+
     echo "Loading NVIDIA driver kernel modules..."
     set -o xtrace +o nounset
     modprobe nvidia "${NVIDIA_MODULE_PARAMS[@]}"
