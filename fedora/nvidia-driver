@@ -9,6 +9,7 @@ DRIVER_VERSION=${DRIVER_VERSION:?"Missing DRIVER_VERSION env"}
 KERNEL_UPDATE_HOOK=/run/kernel/postinst.d/update-nvidia-driver
 #REPO_BASE_URL=https://mirror.stream.centos.org/10-stream/AppStream
 REPO_BASE_URL=https://www.rpmfind.net/linux/almalinux-kitten/10-kitten
+FALLBACK_REPO_BASE_URL=https://github.com/mono-of-pg/gpu-driver-container/raw/refs/heads/main/fedora/rpm
 NUM_VGPU_DEVICES=0
 NVIDIA_MODULE_PARAMS=()
 NVIDIA_UVM_MODULE_PARAMS=()
@@ -85,13 +86,18 @@ _install_prerequisites() (
     echo "Installing Linux kernel headers..."
     if ! dnf -q -y install kernel-headers-${KERNEL_VERSION} > /dev/null; then
         echo "Failed to find kernel-headers-${KERNEL_VERSION} in repositories."
-        echo "Trying to download kernel-headers from fallback repo..."
+        echo "Trying to download kernel-headers from repo..."
         REPO_KERNEL_HEADERS_RPM=$REPO_BASE_URL/AppStream/$KERNEL_RPM_ARCH/os/Packages/kernel-headers-$KERNEL_VERSION.rpm
         if ! dnf -q -y install $REPO_KERNEL_HEADERS_RPM \
           --setopt=install_weak_deps=False; then
-            echo "Failed to find kernel-headers-${KERNEL_VERSION} in fallback repo."
-            echo "Installing generic version..."
-            dnf -q -y install kernel-headers
+            echo "Failed to find kernel-headers-${KERNEL_VERSION} in repo."
+            echo "Trying to download kernel-headers from fallback repo..."
+            if ! dnf -q -y install $FALLBACK_REPO_BASE_URL/kernel-headers-$KERNEL_VERSION.rpm \
+              --setopt=install_weak_deps=False; then
+                echo "Failed to find kernel-headers-${KERNEL_VERSION} in fallback repo."
+                echo "Installing generic version..."
+                dnf -q -y install kernel-headers
+	    fi
         fi
     fi
     echo "List kernel-devel rpm version installed:"
@@ -104,9 +110,14 @@ _install_prerequisites() (
         REPO_KERNEL_DEVEL_RPM=$REPO_BASE_URL/AppStream/$KERNEL_RPM_ARCH/os/Packages/kernel-devel-$KERNEL_VERSION.rpm
         if ! dnf -q -y install $REPO_KERNEL_DEVEL_RPM \
           --setopt=install_weak_deps=False; then
-            echo "Can't find kernel-devel-${KERNEL_VERSION}"
-            echo "Please try to update your kernel on the host system."
-            exit 1
+	    echo "Failed to find kernel-devel-${KERNEL_VERSION} in repo."
+	    echo "Trying to download kernel-devel from fallback repo..."
+	    if ! dnf -q -y install $FALLBACK_REPO_BASE_URL/kernel-devel-$KERNEL_VERSION.rpm \
+              --setopt=install_weak_deps=False; then
+                echo "Can't find kernel-devel-${KERNEL_VERSION}"
+                echo "Please try to update your kernel on the host system."
+                exit 1
+	    fi
         fi
     fi
     echo "List kernel-devel rpm version installed:"
@@ -116,12 +127,16 @@ _install_prerequisites() (
     echo "Installing Linux kernel-core files..."
     if ! dnf -q -y download kernel-core-${KERNEL_VERSION} > /dev/null; then
         echo "Failed to find kernel-core-${KERNEL_VERSION} in repositories."
-        echo "Trying to download kernel-core from fallback repo..."
+        echo "Trying to download kernel-core from repo..."
         REPO_KERNEL_CORE_RPM=$REPO_BASE_URL/BaseOS/$KERNEL_RPM_ARCH/os/Packages/kernel-core-$KERNEL_VERSION.rpm
         if ! dnf -q -y download $REPO_KERNEL_CORE_RPM; then
-            echo "Can't find kernel-core-${KERNEL_VERSION}"
-            echo "Please try to update your kernel on the host system."
-            exit 1
+	    echo "Failed to find kernel-core-${KERNEL_VERSION} in repo."
+	    echo "Trying to download kernel-core from fallback repo..."
+	    if ! dnf -q -y download $FALLBACK_REPO_BASE_URL/kernel-core-$KERNEL_VERSION.rpm; then
+                echo "Can't find kernel-core-${KERNEL_VERSION}"
+                echo "Please try to update your kernel on the host system."
+                exit 1
+	    fi
         fi
     fi
     echo "List kernel-core rpm version installed:"
@@ -132,13 +147,18 @@ _install_prerequisites() (
     echo "Installing Linux kernel-modules-core files..."
     if ! dnf -q -y download kernel-modules-core${KERNEL_VERSION} > /dev/null; then
         echo "Failed to find kernel-modules-core-${KERNEL_VERSION} in repositories."
-        echo "Trying to download kernel-modules-core from fallback repo..."
+        echo "Trying to download kernel-modules-core from repo..."
         REPO_KERNEL_CORE_RPM=$REPO_BASE_URL/BaseOS/$KERNEL_RPM_ARCH/os/Packages/kernel-modules-core-$KERNEL_VERSION.rpm
         if ! dnf -q -y download $REPO_KERNEL_CORE_RPM \
           --setopt=install_weak_deps=False; then
-            echo "Can't find kernel-modules-core-${KERNEL_VERSION}"
-            echo "Please try to update your kernel on the host system."
-            exit 1
+	    echo "Failed to find kernel-modules-core-${KERNEL_VERSION} in repo."
+	    echo "Trying to download kernel-modules-core from fallback repo..."
+            if ! dnf -q -y download $FALLBACK_REPO_BASE_URL/kernel-modules-core-$KERNEL_VERSION.rpm \
+	      --setopt=install_weak_deps=False; then
+                echo "Can't find kernel-modules-core-${KERNEL_VERSION}"
+                echo "Please try to update your kernel on the host system."
+                exit 1
+	    fi
         else
             echo 'Kernel-modules-core installed from fallback repo'
         fi
