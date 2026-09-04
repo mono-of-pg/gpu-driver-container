@@ -11,7 +11,7 @@ dep_installer () {
         curl \
         gcc \
 #        glibc.i686 \
-        glibc\
+        glibc \
         make \
         cpio \
         kmod \
