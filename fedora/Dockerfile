@@ -75,7 +75,7 @@ RUN NVIDIA_GPGKEY_SUM=afbea87d3b979b3788ef34223aeeb323ade481128e2c133723ae99b8a5
     curl -fsSL "https://developer.download.nvidia.com/compute/cuda/repos/rhel10/$OS_ARCH/CDF6BA43.pub" | sed '/^Version/d' > /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA && \
     echo "$NVIDIA_GPGKEY_SUM  /etc/pki/rpm-gpg/RPM-GPG-KEY-NVIDIA" | sha256sum -c --strict -
 
-RUN sh /tmp/install.sh depinstall && \
+RUN sh -x /tmp/install.sh depinstall && \
     curl -fsSL -o /usr/local/bin/donkey https://github.com/3XX0/donkey/releases/download/v1.1.0/donkey && \
     curl -fsSL -o /usr/local/bin/extract-vmlinux https://raw.githubusercontent.com/torvalds/linux/master/scripts/extract-vmlinux && \
     chmod +x /usr/local/bin/donkey /usr/local/bin/extract-vmlinux && \
