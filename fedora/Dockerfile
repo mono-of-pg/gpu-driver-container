@@ -10,7 +10,7 @@ SHELL ["/bin/bash", "-c"]
 RUN dnf config-manager --add-repo https://kitten.repo.almalinux.org/10-kitten/BaseOS/x86_64/os/ && dnf config-manager --add-repo https://kitten.repo.almalinux.org/10-kitten/AppStream/x86_64/os/ && rpm --import https://kitten.repo.almalinux.org/RPM-GPG-KEY-AlmaLinux-10 && dnf makecache
 RUN dnf install -y git wget
 
-ENV GOLANG_VERSION=1.23
+ENV GOLANG_VERSION=1.23.12
 
 # download appropriate binary based on the target architecture for multi-arch builds
 RUN OS_ARCH=${TARGETARCH/x86_64/amd64} && OS_ARCH=${OS_ARCH/aarch64/arm64} && \
