@@ -1,8 +1,7 @@
 #ARG FEDORA_VERSION=36
 
 #FROM nvcr.io/nvidia/cuda:13.0.1-base-ubi9 as build
-#FROM nvcr.io/nvidia/cuda:13.1.0-base-ubi10 as build
-FROM quay.io/okd/scos-content@sha256:43d3a0980179847df84ef9272ed807718cd11411edca81c85ca77fd9d0b127c5 as build
+FROM nvcr.io/nvidia/cuda:13.1.0-base-ubi10 as build
 
 ARG TARGETARCH
 
@@ -29,7 +28,8 @@ RUN git clone https://github.com/NVIDIA/gpu-driver-container driver && \
 
 #ARG FEDORA_VERSION=36
 
-FROM nvcr.io/nvidia/cuda:13.1.0-base-ubi10
+FROM quay.io/okd/scos-content@sha256:43d3a0980179847df84ef9272ed807718cd11411edca81c85ca77fd9d0b127c5
+#FROM nvcr.io/nvidia/cuda:13.1.0-base-ubi10
 #FROM almalinux:10-kitten
 #FROM fedora:${FEDORA_VERSION}
 
